@@ -1,11 +1,40 @@
+"""
+================================================================================
+🛡️ 红利雷达 (radar.py) - 架构契约与迭代红线 (严禁删除/修改本注释块)
+================================================================================
+
+【核心防御与容错资产清单】(以下逻辑为历史踩坑沉淀，重构时必须保留)
+1. 全局 Session 劫持 (patched_get/post): CI IP 被东财 TCP 封杀，必须注入带真实 UA + 连接池复用的 Session 绕过风控。
+2. 数据源彻底去东财化: 东财接口在 CI 必报 RemoteDisconnected，仅保留腾讯周线(stock_zh_a_daily)与新浪实时(fund_etf_spot_sina)。
+3. Symbol 动态前缀拼接: 腾讯/新浪强校验 sh/sz 前缀，硬编码会导致深市标的返回空数据。
+4. 静态兜底机制 (bias=0.0): 外部源全挂时防止流程中断，确保 LLM 分析与推送能走完，避免监控盲区。
+5. AI 字段不可用强制占位符: Prompt 中必须包含防幻觉铁律，防止 AI 将兜底值误判为真实低位并给出错误建议。
+6. Gemini SDK 旧版兼容 + 警告静默: CI pip 缓存易致新版 google-genai 导入失败，旧版 generativeai 功能完好且稳定。
+7. 通用安全请求包装器 (safe_request): 统一指数级退避重试，避免各节点重复编写 try-except 与 sleep 逻辑。
+8. Session 还原保护 (finally): 防止全局猴子补丁污染 Server酱推送等后续请求，推送接口无需伪装 UA。
+9. 完整恢复版终端看板 Prompt: 必须保留五段式结构(结论→信号强度→拆解→箴言→系统摩擦)、双进度条及禁止二次计算铁律。
+
+【后续迭代红线提示】(违反以下规则将导致系统崩溃或输出质量断崖)
+🚫 禁止合并列名匹配逻辑: 新浪 ETF 列名(现价/成交额)与东财不同，换源必须重新打印 list(df.columns) 验证。
+🚫 禁止移除国家队降级标记: fund_scale_change_em 无免费平替，必须保留显式降级，禁止 AI 脑补国家队动向。
+🚫 禁止升级 Python 版本消除 EOL 警告: 3.10 EOL 为 Google 远期预告，升大版本易致 akshare C 扩展编译失败。
+🚫 禁止再次精简 Prompt 结构: [系统摩擦]进度条与元认知箴言是量化审计核心标识，删减结构等同于放弃策略指导价值。
+
+================================================================================
+"""
+
 import os
 import time
+import warnings
 import requests
 import pandas as pd
-import akshare as ak  # 🔑 修复1: 补回 akshare 导入
-from google import genai  # 🔑 修复2: 使用新版 google.genai 替代废弃的 generativeai
+import akshare as ak
+import google.generativeai as genai
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# 🔑 屏蔽 Google SDK 废弃警告，保持日志整洁
+warnings.filterwarnings("ignore", category=FutureWarning, module="google")
 
 
 def get_robust_session():
@@ -92,25 +121,33 @@ def run_radar():
         # --- 3. 国家队 (降级处理) ---
         nat_team = "⚠️ 东财接口被封，暂缺"
 
-        # --- 4. LLM 分析 (🔑 核心修复: 适配新版 google.genai SDK) ---
+        # --- 4. LLM 分析 (完整恢复版终端看板 Prompt) ---
         ai_response = ""
         prompt = (
             f"你是量化审计官。标的{symbol}, 30周乖离{bias}%, "
-            f"股息率{div_yield_str}, 国家队{nat_team}。"
-            "输出300字终端看板含进度条。先结论后分析。"
-            "⚠️ 含'⚠️'字段明确标注不可用，禁推测。附元认知箴言。"
+            f"股息率{div_yield_str}, 国家队{nat_team}。\n\n"
+            
+            "【输出规范】\n"
+            "1. 严格采用终端ASCII看板风格，总字数控制在300字以内。\n"
+            "2. 结构必须包含：[核心结论] → [信号强度 ████░░░░░░] → [技术面/资金面拆解] → [元认知箴言] → [系统摩擦 ░░░███████]。\n"
+            "3. 先给出明确的多空/观望结论与信号强度进度条，再展开数据验证。\n\n"
+            
+            "【防幻觉铁律】\n"
+            "⚠️ 若输入字段包含'⚠️'或'暂缺'，必须在对应分析模块明确标注'[数据源不可用]'，绝对禁止推测、脑补或使用历史常识替代。\n"
+            "⚠️ 所有数值引用必须与输入完全一致，禁止四舍五入或二次计算。\n\n"
+            
+            "【元认知要求】\n"
+            "在最后附上针对当前市场环境的元认知箴言（如周期错位、流动性陷阱等），并用[系统摩擦]进度条量化当前策略的执行阻力。"
         )
         
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-2.5-flash')
             for i in range(3):
                 try:
                     print(f"🤖 请求 Gemini AI... (尝试 {i+1}/3)")
-                    client = genai.Client(api_key=api_key)
-                    response = client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=prompt
-                    )
+                    response = model.generate_content(prompt)
                     ai_response = response.text
                     break
                 except Exception as e:
