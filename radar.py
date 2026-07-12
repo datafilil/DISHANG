@@ -2,7 +2,8 @@ import os
 import time
 import requests
 import pandas as pd
-import google.generativeai as genai
+import akshare as ak  # 🔑 修复1: 补回 akshare 导入
+from google import genai  # 🔑 修复2: 使用新版 google.genai 替代废弃的 generativeai
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -48,7 +49,7 @@ def run_radar():
     symbol = os.getenv("STOCK_LIST", "515180")
     robust_session = get_robust_session()
 
-    # 🔧 全局注入健壮Session
+    # 🔧 全局注入健壮Session绕过东财风控
     original_get, original_post = requests.get, requests.post
     def patched_get(url, **kw):
         kw.setdefault('timeout', 20)
@@ -59,21 +60,16 @@ def run_radar():
     requests.get, requests.post = patched_get, patched_post
 
     try:
-        # --- 1. 周线数据 (🔑 核心修复: 弃用东财，改用腾讯 stock_zh_a_daily) ---
+        # --- 1. 周线数据 (腾讯源) ---
+        prefix = "sh" if symbol.startswith(("5", "6")) else "sz"
+        full_symbol = f"{prefix}{symbol}"
+        
         df_w = safe_request(
             ak.stock_zh_a_daily, 
-            symbol=f"sh{symbol}", period="weekly", adjust="qfq"
+            symbol=full_symbol, period="weekly", adjust="qfq"
         )
-        
-        # Fallback: 若腾讯也失败，尝试新浪
-        if df_w is None:
-            print("🔄 腾讯源失败，切换至新浪源...")
-            df_w = safe_request(
-                ak.stock_zh_a_hist_min_em,  # 注意：此处仅作占位，实际应使用非东财源
-                symbol=symbol, period="weekly", adjust="qfq"
-            )
             
-        # 终极Fallback: 如果所有实时源都挂，使用静态兜底值防止流程中断
+        # 终极Fallback: 数据源全挂时使用静态兜底值防止流程中断
         if df_w is None or df_w.empty:
             print("⚠️ 所有周线数据源均不可用，启用静态兜底")
             bias = 0.0
@@ -81,38 +77,47 @@ def run_radar():
             ma30 = df_w['close'].rolling(30).mean().iloc[-1]
             bias = round((df_w.iloc[-1]["close"] / ma30 - 1) * 100, 2)
 
-        # --- 2. 实时行情 (🔑 改用腾讯 fund_etf_spot_sina) ---
+        # --- 2. 实时行情 (新浪源) ---
         div_yield_str = "⚠️ 数据获取失败"
         etf_spot = safe_request(ak.fund_etf_spot_sina)
         if etf_spot is not None:
             print(f"📋 新浪ETF列名: {list(etf_spot.columns)}")
-            row = etf_spot[etf_spot['代码'].astype(str) == f"sh{symbol}"]
+            row = etf_spot[etf_spot['代码'].astype(str) == full_symbol]
             if not row.empty and '现价' in row.columns and '成交额' in row.columns:
                 price = float(row['现价'].iloc[0])
                 volume = float(row['成交额'].iloc[0])
                 dy = round(price / volume * 100, 4) if volume > 0 else None
                 div_yield_str = f"{dy}%" if dy else "⚠️ 成交额为0"
 
-        # --- 3. 国家队 (降级为静态提示，因fund_scale_change_em也是东财源) ---
+        # --- 3. 国家队 (降级处理) ---
         nat_team = "⚠️ 东财接口被封，暂缺"
 
-        # --- 4. LLM 分析 ---
+        # --- 4. LLM 分析 (🔑 核心修复: 适配新版 google.genai SDK) ---
         ai_response = ""
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
         prompt = (
             f"你是量化审计官。标的{symbol}, 30周乖离{bias}%, "
             f"股息率{div_yield_str}, 国家队{nat_team}。"
             "输出300字终端看板含进度条。先结论后分析。"
             "⚠️ 含'⚠️'字段明确标注不可用，禁推测。附元认知箴言。"
         )
-        for i in range(3):
-            try:
-                resp = genai.GenerativeModel('gemini-2.5-flash').generate_content(prompt)
-                ai_response = resp.text
-                break
-            except Exception as e:
-                print(f"❌ AI失败: {e}")
-                if i < 2: time.sleep(5)
+        
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key:
+            for i in range(3):
+                try:
+                    print(f"🤖 请求 Gemini AI... (尝试 {i+1}/3)")
+                    client = genai.Client(api_key=api_key)
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt
+                    )
+                    ai_response = response.text
+                    break
+                except Exception as e:
+                    print(f"❌ AI失败: {e}")
+                    if i < 2: time.sleep(5)
+        else:
+            print("⚠️ 未配置 GEMINI_API_KEY")
 
         if not ai_response:
             ai_response = f"⚠️ AI不可用 | 乖离{bias}% 股息{div_yield_str} 国家队{nat_team}"
