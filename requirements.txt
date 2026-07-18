@@ -1,0 +1,66 @@
+# === 核心依赖 (CI Run #16 成功快照) ===
+akshare==1.18.64
+pandas==2.3.3
+requests==2.34.2
+google-generativeai==0.8.6
+
+# === akshare 子依赖 ===
+beautifulsoup4==4.15.0
+lxml==6.1.1
+curl_cffi==0.15.0
+html5lib==1.1
+xlrd==2.0.2
+urllib3==2.7.0
+tqdm==4.68.4
+openpyxl==3.1.5
+jsonpath==0.82.2
+tabulate==0.10.0
+decorator==5.3.1
+py-mini-racer==0.6.0
+akracer==0.0.14
+soupsieve==2.8.4
+six==1.17.0
+webencodings==0.5.1
+et-xmlfile==2.0.0
+
+# === pandas 子依赖 ===
+numpy==2.2.6
+python-dateutil==2.9.0.post0
+pytz==2026.2
+tzdata==2026.3
+
+# === requests 子依赖 ===
+charset-normalizer==3.4.9
+idna==3.18
+certifi==2026.6.17
+
+# === google-generativeai 子依赖 ===
+google-ai-generativelanguage==0.6.15
+google-api-core==2.32.0
+google-api-python-client==2.198.0
+google-auth==2.56.0
+google-auth-httplib2==0.4.0
+googleapis-common-protos==1.75.0
+grpcio==1.82.1
+grpcio-status==1.71.2
+proto-plus==1.28.1
+protobuf==5.29.6
+pydantic==2.13.4
+pydantic-core==2.46.4
+typing-extensions==4.16.0
+typing-inspection==0.4.2
+annotated-types==0.7.0
+httplib2==0.32.0
+uritemplate==4.2.0
+pyparsing==3.3.2
+pyasn1==0.6.4
+pyasn1-modules==0.4.2
+cryptography==49.0.0
+cffi==2.1.0
+pycparser==3.0
+
+# === curl_cffi / rich 子依赖 ===
+rich==15.0.0
+markdown-it-py==4.2.0
+pygments==2.20.0
+mdurl==0.1.2
